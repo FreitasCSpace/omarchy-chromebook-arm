@@ -1,0 +1,288 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Cameras of the Lenovo IdeaPad Duet 5 Chromebook (homestar), for the
+ * Omarchy Chromebook port. Included at the end of the mainline homestar
+ * board files.
+ *
+ * Mainline's sc7180.dtsi has no CAMSS or CCI node yet. The CAMSS node follows
+ * George Chan's sc7180 CAMSS series (RFT v3, 2024); its addresses, interrupts
+ * and SMMU stream IDs are checked against ChromeOS's homestar device tree.
+ *
+ * The wiring is ChromeOS's: the rear OV8856 (autofocus module) sits on CCI0
+ * master 1 and CSIPHY1, powered by the wf_cam rails (GPIO7), reset on GPIO29,
+ * clocked by MCLK1. The front OV5675 sits on CCI0 master 0 and CSIPHY0,
+ * powered by the uf_cam rails (GPIO6), reset on GPIO30, clocked by MCLK0.
+ */
+
+#include <dt-bindings/clock/qcom,camcc-sc7180.h>
+
+&{/soc@0} {
+	camss: isp@acb3000 {
+		compatible = "qcom,sc7180-camss";
+
+		reg = <0 0x0acb3000 0 0x1000>,
+		      <0 0x0acba000 0 0x1000>,
+		      <0 0x0acc8000 0 0x1000>,
+		      <0 0x0ac65000 0 0x1000>,
+		      <0 0x0ac66000 0 0x1000>,
+		      <0 0x0ac67000 0 0x1000>,
+		      <0 0x0ac68000 0 0x1000>,
+		      <0 0x0acaf000 0 0x4000>,
+		      <0 0x0acb6000 0 0x4000>,
+		      <0 0x0acc4000 0 0x4000>;
+		reg-names = "csid0",
+			    "csid1",
+			    "csid2",
+			    "csiphy0",
+			    "csiphy1",
+			    "csiphy2",
+			    "csiphy3",
+			    "vfe0",
+			    "vfe1",
+			    "vfe_lite";
+
+		clocks = <&camcc CAM_CC_CAMNOC_AXI_CLK>,
+			 <&camcc CAM_CC_CPAS_AHB_CLK>,
+			 <&camcc CAM_CC_IFE_0_CSID_CLK>,
+			 <&camcc CAM_CC_IFE_1_CSID_CLK>,
+			 <&camcc CAM_CC_IFE_LITE_CSID_CLK>,
+			 <&camcc CAM_CC_CSIPHY0_CLK>,
+			 <&camcc CAM_CC_CSI0PHYTIMER_CLK>,
+			 <&camcc CAM_CC_CSIPHY1_CLK>,
+			 <&camcc CAM_CC_CSI1PHYTIMER_CLK>,
+			 <&camcc CAM_CC_CSIPHY2_CLK>,
+			 <&camcc CAM_CC_CSI2PHYTIMER_CLK>,
+			 <&camcc CAM_CC_CSIPHY3_CLK>,
+			 <&camcc CAM_CC_CSI3PHYTIMER_CLK>,
+			 <&gcc GCC_CAMERA_HF_AXI_CLK>,
+			 <&camcc CAM_CC_SOC_AHB_CLK>,
+			 <&camcc CAM_CC_IFE_0_AXI_CLK>,
+			 <&camcc CAM_CC_IFE_0_CLK>,
+			 <&camcc CAM_CC_IFE_0_CPHY_RX_CLK>,
+			 <&camcc CAM_CC_IFE_1_AXI_CLK>,
+			 <&camcc CAM_CC_IFE_1_CLK>,
+			 <&camcc CAM_CC_IFE_1_CPHY_RX_CLK>,
+			 <&camcc CAM_CC_IFE_LITE_CLK>,
+			 <&camcc CAM_CC_IFE_LITE_CPHY_RX_CLK>;
+		clock-names = "camnoc_axi",
+			      "cpas_ahb",
+			      "csi0",
+			      "csi1",
+			      "csi2",
+			      "csiphy0",
+			      "csiphy0_timer",
+			      "csiphy1",
+			      "csiphy1_timer",
+			      "csiphy2",
+			      "csiphy2_timer",
+			      "csiphy3",
+			      "csiphy3_timer",
+			      "gcc_camera_axi",
+			      "soc_ahb",
+			      "vfe0_axi",
+			      "vfe0",
+			      "vfe0_cphy_rx",
+			      "vfe1_axi",
+			      "vfe1",
+			      "vfe1_cphy_rx",
+			      "vfe_lite",
+			      "vfe_lite_cphy_rx";
+
+		interrupts = <GIC_SPI 464 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 466 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 473 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 477 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 478 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 479 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 461 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 465 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 467 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 472 IRQ_TYPE_EDGE_RISING>;
+		interrupt-names = "csid0",
+				  "csid1",
+				  "csid2",
+				  "csiphy0",
+				  "csiphy1",
+				  "csiphy2",
+				  "csiphy3",
+				  "vfe0",
+				  "vfe1",
+				  "vfe_lite";
+
+		iommus = <&apps_smmu 0x820 0x0>,
+			 <&apps_smmu 0x840 0x0>,
+			 <&apps_smmu 0x860 0x0>;
+
+		power-domains = <&camcc IFE_0_GDSC>,
+				<&camcc IFE_1_GDSC>,
+				<&camcc TITAN_TOP_GDSC>;
+		power-domain-names = "ife0", "ife1", "top";
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				csiphy0_ep: endpoint {
+					clock-lanes = <7>;
+					data-lanes = <0 1>;
+					remote-endpoint = <&ov5675_ep>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				csiphy1_ep: endpoint {
+					clock-lanes = <7>;
+					data-lanes = <0 1 2 3>;
+					remote-endpoint = <&ov8856_ep>;
+				};
+			};
+		};
+	};
+
+	cci0: cci@ac4a000 {
+		compatible = "qcom,sdm845-cci", "qcom,msm8996-cci";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		reg = <0 0x0ac4a000 0 0x1000>;
+		interrupts = <GIC_SPI 468 IRQ_TYPE_EDGE_RISING>;
+		power-domains = <&camcc TITAN_TOP_GDSC>;
+
+		clocks = <&camcc CAM_CC_CAMNOC_AXI_CLK>,
+			 <&camcc CAM_CC_SOC_AHB_CLK>,
+			 <&camcc CAM_CC_SLOW_AHB_CLK_SRC>,
+			 <&camcc CAM_CC_CPAS_AHB_CLK>,
+			 <&camcc CAM_CC_CCI_0_CLK>,
+			 <&camcc CAM_CC_CCI_0_CLK_SRC>;
+		clock-names = "camnoc_axi",
+			      "soc_ahb",
+			      "slow_ahb_src",
+			      "cpas_ahb",
+			      "cci",
+			      "cci_src";
+
+		assigned-clocks = <&camcc CAM_CC_CCI_0_CLK>;
+		assigned-clock-rates = <37500000>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&cci0_m0_default &cci0_m1_default>;
+
+		cci0_i2c0: i2c-bus@0 {
+			reg = <0>;
+			clock-frequency = <1000000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* Front camera */
+			camera@10 {
+				compatible = "ovti,ov5675";
+				reg = <0x10>;
+
+				reset-gpios = <&tlmm 30 GPIO_ACTIVE_LOW>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&cam_front_default &cam_mclk0_default>;
+
+				clocks = <&camcc CAM_CC_MCLK0_CLK>;
+				assigned-clocks = <&camcc CAM_CC_MCLK0_CLK>;
+				assigned-clock-rates = <19200000>;
+
+				avdd-supply = <&pp2800_uf_cam>;
+				dovdd-supply = <&pp1800_uf_cam>;
+
+				orientation = <0>;
+
+				port {
+					ov5675_ep: endpoint {
+						data-lanes = <1 2>;
+						link-frequencies = /bits/ 64 <450000000>;
+						remote-endpoint = <&csiphy0_ep>;
+					};
+				};
+			};
+		};
+
+		cci0_i2c1: i2c-bus@1 {
+			reg = <1>;
+			clock-frequency = <1000000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* Rear camera */
+			camera@10 {
+				compatible = "ovti,ov8856";
+				reg = <0x10>;
+
+				reset-gpios = <&tlmm 29 GPIO_ACTIVE_LOW>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&cam_rear_default &cam_mclk1_default>;
+
+				clocks = <&camcc CAM_CC_MCLK1_CLK>;
+				clock-names = "xvclk";
+				assigned-clocks = <&camcc CAM_CC_MCLK1_CLK>;
+				assigned-clock-rates = <19200000>;
+
+				avdd-supply = <&pp2800_wf_cam>;
+				dovdd-supply = <&pp1800_wf_cam>;
+
+				orientation = <1>;
+
+				port {
+					ov8856_ep: endpoint {
+						data-lanes = <1 2 3 4>;
+						link-frequencies = /bits/ 64 <360000000 180000000>;
+						remote-endpoint = <&csiphy1_ep>;
+					};
+				};
+			};
+		};
+	};
+};
+
+&tlmm {
+	cci0_m0_default: cci0-m0-default-state {
+		pins = "gpio17", "gpio18";
+		function = "cci_i2c";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	cci0_m1_default: cci0-m1-default-state {
+		pins = "gpio19", "gpio20";
+		function = "cci_i2c";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	cam_mclk0_default: cam-mclk0-default-state {
+		pins = "gpio13";
+		function = "cam_mclk";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_mclk1_default: cam-mclk1-default-state {
+		pins = "gpio14";
+		function = "cam_mclk";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_front_default: cam-front-default-state {
+		pins = "gpio30";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_rear_default: cam-rear-default-state {
+		pins = "gpio29";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};

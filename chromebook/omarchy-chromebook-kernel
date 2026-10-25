@@ -20,6 +20,9 @@ set -euo pipefail
 CMDLINE_FILE=/etc/kernel/chromebook-cmdline
 DEVKEYS=/usr/share/vboot/devkeys
 DTB_DIR=/boot/dtbs/qcom
+# The port's own builds of a board's device tree (the Duet 5's, with its
+# cameras) take the place of the kernel's copy of the same name.
+DTB_OVERRIDE_DIR=/usr/share/omarchy-chromebook/dtbs
 
 partition=""
 while (($#)); do
@@ -59,6 +62,9 @@ done
 # Trogdor is the Snapdragon 7c (SC7180) family, Herobrine the 7c+ Gen 3 (SC7280).
 dtbs=()
 for dtb in "$DTB_DIR"/sc7180-trogdor-*.dtb "$DTB_DIR"/sc7280-herobrine-*.dtb; do
+  if [[ -f $DTB_OVERRIDE_DIR/${dtb##*/} ]]; then
+    dtb=$DTB_OVERRIDE_DIR/${dtb##*/}
+  fi
   [[ -f $dtb ]] && dtbs+=("$dtb")
 done
 if ((${#dtbs[@]} == 0)); then
