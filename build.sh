@@ -138,6 +138,9 @@ bsdtar -xpf "$rootfs_tarball" -C "$mnt"
 step "Configuring pacman for Omarchy ($channel)"
 install -m 0644 "$omarchy_ref/default/pacman/aarch64/pacman-$channel.conf" "$mnt/etc/pacman.conf"
 install -m 0644 "$omarchy_ref/default/pacman/aarch64/mirrorlist-$channel" "$mnt/etc/pacman.d/mirrorlist"
+# Arch Linux ARM's prebuilt AUR repository carries rmtfs-git and qrtr-git, which
+# the Duet 5's Wi-Fi needs; Omarchy's pacman.conf leaves that repository out.
+printf '\n[aur]\nInclude = /etc/pacman.d/mirrorlist\n' >>"$mnt/etc/pacman.conf"
 install -m 0644 "$omarchy_key" "$mnt/root/omarchy.gpg"
 target pacman-key --init
 target pacman-key --populate archlinuxarm
