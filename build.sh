@@ -178,6 +178,12 @@ target systemctl enable omarchy-chromebook-growroot.service
 fi
 
 install -Dm 0644 "$here/chromebook/zz-omarchy-chromebook.conf" "$mnt/etc/mkinitcpio.conf.d/zz-omarchy-chromebook.conf"
+# The modem trogdor's Wi-Fi runs on boots only once rmtfs serves its storage
+# and starts it (see the drop-in).
+pacman_install rmtfs-git qrtr-git
+install -Dm 0644 "$here/chromebook/rmtfs-dir.service.d.conf" "$mnt/etc/systemd/system/rmtfs-dir.service.d/omarchy-chromebook.conf"
+install -Dm 0644 "$here/chromebook/modules-load.conf" "$mnt/etc/modules-load.d/omarchy-chromebook.conf"
+target systemctl enable rmtfs-dir.service
 # Arch Linux ARM's vboot-utils ships no developer keys. These are vboot_reference's
 # public test keys, which every Chromebook in developer mode accepts.
 install -Dm 0644 -t "$mnt/usr/share/vboot/devkeys" "$here/chromebook/devkeys/kernel.keyblock" "$here/chromebook/devkeys/kernel_data_key.vbprivk"
