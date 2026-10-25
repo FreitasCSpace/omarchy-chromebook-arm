@@ -1,0 +1,10 @@
+[Unit]
+Description=Set the Chromebook's speaker channel count in its ALSA profile
+Before=sound.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-chromebook-ucm
+
+[Install]
+WantedBy=sound.target

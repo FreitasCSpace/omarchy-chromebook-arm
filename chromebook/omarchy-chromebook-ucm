@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# Gives the Lenovo Duet 5 (homestar) its four-channel speaker output in
+# alsa-ucm-conf's SC7180 RT5682/MAX98357A profile.
+#
+# The Duet 5 drives four speakers and its speaker DAI only opens with four
+# channels. The packaged profile asks for two, so opening the speaker fails and
+# PipeWire falls back to its Dummy output. Every other trogdor board keeps the
+# packaged profile.
+#
+# Runs at boot (omarchy-chromebook-ucm.service), since an image is built away
+# from the Chromebook, and after every alsa-ucm-conf update (pacman hook),
+# which puts the packaged profile back. Idempotent.
+
+set -euo pipefail
+
+hifi=/usr/share/alsa/ucm2/Qualcomm/sc7180/rt5682-max98357a/HiFi.conf
+
+if [[ ! -f $hifi ]]; then
+  exit 0
+fi
+if ! tr '\0' '\n' </sys/firmware/devicetree/base/compatible 2>/dev/null | grep -q '^google,homestar'; then
+  exit 0
+fi
+
+sed -i '/SectionDevice."Speaker"/,/^}/ s/^\([[:space:]]*PlaybackChannels\) 2$/\1 4/' "$hifi"

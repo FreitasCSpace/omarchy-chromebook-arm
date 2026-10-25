@@ -184,6 +184,12 @@ pacman_install rmtfs-git qrtr-git
 install -Dm 0644 "$here/chromebook/rmtfs-dir.service.d.conf" "$mnt/etc/systemd/system/rmtfs-dir.service.d/omarchy-chromebook.conf"
 install -Dm 0644 "$here/chromebook/modules-load.conf" "$mnt/etc/modules-load.d/omarchy-chromebook.conf"
 target systemctl enable rmtfs-dir.service
+# The Duet 5's speakers only open as four channels (see the script).
+install -m 0755 "$here/chromebook/omarchy-chromebook-ucm" "$mnt/usr/bin/omarchy-chromebook-ucm"
+install -m 0644 "$here/chromebook/omarchy-chromebook-ucm.service" "$mnt/etc/systemd/system/omarchy-chromebook-ucm.service"
+install -Dm 0644 "$here/chromebook/omarchy-chromebook-ucm.hook" "$mnt/etc/pacman.d/hooks/omarchy-chromebook-ucm.hook"
+install -Dm 0644 "$here/chromebook/51-sc7180-speaker.conf" "$mnt/etc/wireplumber/wireplumber.conf.d/51-sc7180-speaker.conf"
+target systemctl enable omarchy-chromebook-ucm.service
 # Arch Linux ARM's vboot-utils ships no developer keys. These are vboot_reference's
 # public test keys, which every Chromebook in developer mode accepts.
 install -Dm 0644 -t "$mnt/usr/share/vboot/devkeys" "$here/chromebook/devkeys/kernel.keyblock" "$here/chromebook/devkeys/kernel_data_key.vbprivk"

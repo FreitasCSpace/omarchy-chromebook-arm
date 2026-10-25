@@ -1,0 +1,10 @@
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Target = usr/share/alsa/ucm2/Qualcomm/sc7180/*
+
+[Action]
+Description = Restoring the Chromebook speaker channel count...
+When = PostTransaction
+Exec = /usr/bin/omarchy-chromebook-ucm
