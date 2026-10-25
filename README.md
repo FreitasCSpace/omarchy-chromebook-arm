@@ -1,63 +1,105 @@
-# Omarchy para Chromebooks Qualcomm (pen USB / cartão SD)
+# Omarchy for the Lenovo IdeaPad Duet 5 Chromebook
 
-Imagem do Omarchy 4 (aarch64) que arranca pelo bootloader do próprio Chromebook (depthcharge), sem tocar no ChromeOS do disco interno. No ecrã de arranque escolhe-se entre ChromeOS (Ctrl+D) e Omarchy na pen (Ctrl+U).
+A bootable [Omarchy](https://omarchy.org) 4 (aarch64) image for the **Lenovo IdeaPad Duet 5 Chromebook** (board `homestar`, Snapdragon 7c Gen 2 / SC7180). It runs from a USB stick or SD card through the Chromebook's own bootloader (depthcharge) and leaves ChromeOS on the internal drive untouched: on the developer-mode boot screen, Ctrl+D starts ChromeOS and Ctrl+U starts Omarchy.
 
-Modelos alvo: Snapdragon 7c / 7c Gen 2 ("trogdor": Lenovo Duet 5 / IdeaPad 5 CB, Acer Spin 513, HP Chromebook 11a/x2, Samsung Galaxy Chromebook Go, etc.) e 7c+ Gen 3 ("herobrine"). O kernel leva os device trees de todos e o firmware escolhe o do modelo.
+**The Duet 5 is the only device this is tested on and the only one it supports.** Other Snapdragon 7c Chromebooks are close relatives; see [Other devices](#other-devices).
 
-## Como funciona
+## Status
 
-- Base: Arch Linux ARM + kernel `linux-aarch64` (já traz os drivers do SC7180/SC7280), com os repositórios aarch64 oficiais do Omarchy, no canal **rc** (`pkgs.omarchy.org/rc/aarch64`). O `omarchy` 4.0.6 do canal stable para aarch64 é anterior ao detetor de plataforma, ao `omarchy-pkg-defaults` e à configuração de hardware adiada, que este build usa; o 4.5.0rc1 já os tem. Usa `OMARCHY_CHANNEL=stable` quando o stable os tiver.
-- O `btrfs-overlayfs` (hook do mkinitcpio para arrancar snapshots pelo Limine) é retirado por `zz-omarchy-chromebook.conf`: sem Limine não existe nem tem o que arrancar. Os snapshots do snapper continuam a ser criados.
-- `chromebook/devkeys/` traz as chaves de teste públicas do `vboot_reference` da Google (as mesmas que qualquer Chromebook em modo de programador aceita), porque o `vboot-utils` do Arch Linux ARM não as inclui.
-- O Omarchy é instalado pela mesma sequência do instalador oficial (pacotes iniciais, `omarchy-pkg-defaults aarch64-qualcomm`, `omarchy-apply-system --defer-provisioning`), e a configuração do hardware fica adiada para o primeiro arranque no Chromebook (manifesto de imagem do Omarchy).
-- Arranque: em vez do Limine/UEFI, `omarchy-chromebook-kernel` empacota kernel + initramfs + device trees num FIT, assina-o com as chaves de programador do vboot e grava-o na partição `KERN-A`. Um post-hook do mkinitcpio (`/etc/initcpio/post/90-omarchy-chromebook`) repete isto a cada atualização do kernel ou do initramfs.
-- No primeiro arranque: a partição root cresce até ao tamanho total da pen, o hardware é configurado, o initramfs é refeito para este modelo e o assistente do Omarchy pede o nome de utilizador e a palavra-passe.
+| Hardware | State |
+| --- | --- |
+| Boot from USB / SD (depthcharge, Ctrl+U) | works |
+| OLED display, detachable keyboard, battery | works |
+| Wi-Fi | works (needs the ChromeOS modem firmware, see [Build](#build)) |
+| Bluetooth | works |
+| Speakers | works (four-channel profile fix, see below) |
+| Front camera (OV5675) | works, through libcamera's software ISP and PipeWire |
+| Rear camera (OV8856) | **not working**: the sensor does not answer on I2C yet |
+| Touchscreen, pen, suspend, headphone jack | not verified |
+| Install to the internal drive / dual boot | not supported |
 
-Disposição da imagem: `p1 KERN-A` (256 MiB, kernel assinado) e `p2 root` (btrfs com os subvolumes `@`, `@home`, `@log` e `@pkg`, como no instalador oficial). A imagem não é encriptada.
+## How it works
 
-## Construir
+- **Base:** Arch Linux ARM with its `linux-aarch64` kernel, plus Omarchy's official aarch64 repositories on the **rc** channel (`pkgs.omarchy.org/rc/aarch64`). Stable's aarch64 `omarchy` (4.0.6) predates the platform detector, `omarchy-pkg-defaults` and deferred hardware setup this build relies on; 4.5.0rc1 has them. Set `OMARCHY_CHANNEL=stable` once stable catches up.
+- **Install:** `build.sh` follows the Omarchy ISO's install sequence (early packages, `omarchy-pkg-defaults aarch64-qualcomm`, `omarchy-apply-system --defer-provisioning`) inside the image. Hardware setup waits for the first boot on the Chromebook, through Omarchy's image manifest.
+- **Boot:** there is no UEFI or Limine. `omarchy-chromebook-kernel` packs the kernel, the initramfs and the homestar device trees into a FIT image, signs it with vboot's developer keys and writes it to the `KERN-A` partition. A mkinitcpio post hook (`/etc/initcpio/post/90-omarchy-chromebook`) does this again after every kernel or initramfs update. `chromebook/devkeys/` carries vboot_reference's public test keys (the ones every Chromebook in developer mode accepts), because Arch Linux ARM's `vboot-utils` ships none.
+- **First boot:** the root partition grows to fill the drive, hardware setup runs, the initramfs is rebuilt for the machine, and Omarchy's first-run wizard asks for a user name and password.
 
-Num sistema aarch64 (por exemplo, o Linux do próprio Chromebook):
+Image layout: `p1 KERN-A` (256 MiB, signed kernel) and `p2 root` (btrfs with `@`, `@home`, `@log` and `@pkg`, as the Omarchy ISO lays them out). The image is not encrypted.
+
+### Duet 5 fixes
+
+| Problem | Fix |
+| --- | --- |
+| The initramfs could not find the root from depthcharge's `root=PARTUUID=%U/PARTNROFF=1` | the command line names the root by its btrfs UUID |
+| 30 s after boot the kernel turned off `pp3300_hub`, the internal USB hub's rail, and the boot drive vanished (Arch Linux ARM doesn't build `CONFIG_USB_ONBOARD_DEV`, the driver that claims it) | `regulator_ignore_unused` on the command line |
+| No Wi-Fi: the WCN3990 runs on the modem, which needs Google-signed firmware and `rmtfs` to boot it | `fetch-chromeos-firmware.sh` takes the firmware from Google's recovery image; `rmtfs` and `qrtr` are installed, with the modem's EFS files created before `rmtfs` starts |
+| Speakers showed up as PipeWire's "Dummy" output: the Duet 5's speaker DAI only opens with four channels, alsa-ucm-conf asks for two | `omarchy-chromebook-ucm` patches the SC7180 profile at boot and after every alsa-ucm-conf update; WirePlumber upmixes stereo to the rear pair |
+| `btrfs-overlayfs` (the mkinitcpio hook for booting Limine snapshots) has nothing to boot without Limine | removed by `zz-omarchy-chromebook.conf`; snapper still takes snapshots |
+
+### Cameras
+
+Mainline Linux has no camera support for the SC7180 yet: CAMSS (Qualcomm's camera subsystem driver) doesn't know the chip, `sc7180.dtsi` has no CAMSS or CCI node, and the homestar device tree describes no sensors. The port adds all three:
+
+- `camera/0001-media-qcom-camss-add-sc7180-support.patch` adds SC7180 to Linux 7.3's CAMSS, modelled on its SDM670 support, with the CSIPHY 1.2.2 lane settings from George Chan's [SC7180 CAMSS series (2024)](https://patchwork.kernel.org/project/linux-media/cover/20240624-b4-sc7180-camss-v3-0-89ece6471431@gmail.com/), which was never merged.
+- `camera/dkms/` is that patched driver plus the OV5675 sensor driver (which Arch Linux ARM doesn't build) as a DKMS package, so every kernel update rebuilds them.
+- `camera/sc7180-trogdor-homestar-camera.dtsi` describes CAMSS, CCI0 and the front OV5675, wired as ChromeOS's own homestar device tree wires them. `camera/build-dtbs.sh` builds the homestar DTBs with it from the kernel's source, and `omarchy-chromebook-kernel` uses them instead of the kernel's.
+- libcamera's simple pipeline with its software ISP turns the raw sensor output into video, and `camera/70-dma-heap.rules` lets the logged-in user open the dma-buf heaps it allocates from. Browsers reach the camera through PipeWire.
+
+The rear OV8856 sits on CCI0 master 1 at 0x10 and does not acknowledge on I2C with the power-up ChromeOS's device tree describes, so it is left out of the device tree for now (CAMSS waits for every sensor in its graph before it registers any). Its wiring is documented in the `.dtsi`.
+
+## Build
+
+On an aarch64 Linux machine (the Duet 5's own Linux development environment works):
 
 ```bash
-sudo apt install vboot-kernel-utils cgpt u-boot-tools arch-install-scripts libarchive-tools btrfs-progs gdisk lz4 device-tree-compiler
+sudo apt install vboot-kernel-utils cgpt u-boot-tools arch-install-scripts libarchive-tools \
+  btrfs-progs gdisk lz4 device-tree-compiler cpp
+git clone https://github.com/FreitasCSpace/omarchy-chromebook-arm.git
+cd omarchy-chromebook-arm
 git clone --depth 1 https://github.com/basecamp/omarchy.git upstream
 git clone --depth 1 https://github.com/omacom/omarchy-iso.git iso
-sudo ./fetch-chromeos-firmware.sh   # firmware do modem/Wi-Fi, tirado da imagem de recuperação oficial do ChromeOS
-sudo ./build.sh            # -> out/omarchy-chromebook.img (14 GiB, cabe numa pen de 16 GB)
+sudo ./fetch-chromeos-firmware.sh   # Wi-Fi modem firmware from Google's recovery image
+sudo ./build.sh                      # -> out/omarchy-duet5.img (14 GiB, fits a 16 GB stick)
 ```
 
-O Wi-Fi da trogdor (WCN3990) corre no subsistema do modem, que arranca imagens assinadas pela Google (`qcom/sc7180-trogdor/modem*/{mba,qdsp6sw}.mbn`). O linux-firmware não as traz e não podem ser redistribuídas, por isso o repositório inclui o script e não os ficheiros. O script descarrega a imagem de recuperação "strongbad" (homestar, coachz, wormdingler, quackingstick) e copia só esse diretório. Para outros modelos, passa-lhe o URL certo do `recovery2.json`.
+The modem firmware (`qcom/sc7180-trogdor/modem*/{mba,qdsp6sw}.mbn`) is signed by Google, isn't in linux-firmware and can't be redistributed, so the repository carries the script that extracts it rather than the files. Without it the image boots with no Wi-Fi.
 
-Os pacotes ficam em cache em `dl/pkg`, por isso um segundo build não volta a descarregar nada. `sudo ./build.sh --resume` reaproveita uma imagem cuja instalação de pacotes já terminou e corre só a configuração seguinte. Serve para iterar sobre um passo que falhou; uma imagem para distribuir faz-se sempre sem ele.
+Packages are cached in `dl/pkg`, so a second build downloads nothing twice. `sudo ./build.sh --resume` reuses an image whose package install already finished and reruns only the setup after it; it is for iterating on a failed step, and a release image is always built without it.
 
-## Instalar e arrancar
+## Install and boot
 
-> **Atenção:** ativar o modo de programador faz um **powerwash**, que apaga tudo o que está no Chromebook, **incluindo o Linux (Crostini) e os ficheiros dele**. Faz cópia de segurança antes. O ChromeOS em si continua a funcionar.
+> **Warning:** turning on developer mode powerwashes the Chromebook. That erases everything on it, **including the Linux development environment and its files**. Back up first. If developer mode is already on, skip step 2.
 
-1. Grava a imagem numa pen USB ou cartão SD com 16 GB ou mais. Faz isto antes do powerwash se estás a construir no Crostini: partilha a pen com o Linux e corre `sudo dd if=out/omarchy-chromebook.img of=/dev/sdX bs=4M status=progress conv=fsync`. Em alternativa, usa o balenaEtcher noutro computador.
-2. Ativa o modo de programador: desliga o Chromebook, carrega em Esc + Atualizar + Power, e depois Ctrl+D e confirma. O Chromebook apaga-se e reinicia.
-3. No ChromeOS, abre o crosh (Ctrl+Alt+T), escreve `shell` e corre:
+1. Write the image to a USB stick or SD card of 16 GB or more: `sudo dd if=out/omarchy-duet5.img of=/dev/sdX bs=4M status=progress conv=fsync`, or use balenaEtcher. From ChromeOS's Linux environment, first connect the stick to Linux (Settings → Developers → Linux development environment → Manage USB devices).
+2. Turn on developer mode: power off, hold Esc + Refresh and press Power, then press Ctrl+D and confirm.
+3. Allow booting from USB. `sudo` doesn't work in crosh's `shell`, so use the VT-2 console: press Ctrl+Alt+→ (or Ctrl+Alt+F2), log in as `chronos`, and run
    ```bash
    sudo crossystem dev_boot_usb=1 dev_boot_signed_only=0
    ```
-4. Liga a pen, reinicia e, no ecrã "OS verification is OFF", carrega em **Ctrl+U**. Em firmware mais recente, escolhe "Boot from external disk".
-5. O primeiro arranque demora alguns minutos: cresce a partição, configura o hardware e refaz o kernel. Depois aparece o assistente do Omarchy para criares o utilizador.
+   `sudo crossystem dev_boot_usb` prints `1` when it took (without a trailing newline, so it lands right before the next prompt). Ctrl+Alt+← goes back to ChromeOS.
+4. Plug in the stick, reboot, and press **Ctrl+U** on the "OS verification is OFF" screen (newer firmware: choose "Boot from external disk").
+5. The first boot takes a few minutes. Omarchy's wizard then asks for your user.
 
-Para voltar ao ChromeOS, basta reiniciar sem a pen ou carregar em Ctrl+D.
+To get back to ChromeOS, reboot without the stick or press Ctrl+D.
 
-## Estado
+## Other devices
 
-| Componente | Estado |
+These Chromebooks use the same Snapdragon 7c (SC7180, "trogdor") platform and have device trees in mainline Linux, so they are the most likely candidates for a port. **None of them is tested or supported.** Each needs at least its own device tree in `omarchy-chromebook-kernel`, its ChromeOS recovery image in `fetch-chromeos-firmware.sh`, and a check of its audio profile; the camera wiring and sensors differ per board.
+
+| Board | Device |
 | --- | --- |
-| Build da imagem | funciona num Chromebook trogdor (Crostini aarch64); assinatura vboot e FIT verificados com `futility` e `dumpimage` |
-| Arranque por depthcharge, ecrã, teclado, Wi-Fi, áudio | **por testar no hardware**: os drivers e o firmware estão no kernel e no `linux-firmware-qcom`, mas ainda não arrancou num Chromebook real |
-| Dual boot no disco interno | não suportado (ver abaixo) |
+| `wormdingler` | Lenovo IdeaPad Duet 3 Chromebook (Lenovo Chromebook Duet 3) |
+| `coachz` | HP Chromebook x2 11 |
+| `quackingstick` | Acer Chromebook Tab 510 |
+| `lazor` | Acer Chromebook Spin 513 (CP513-1H / 1HL) |
+| `limozeen` | Acer Chromebook 511 (C741L / C741LT) |
+| `pompom` | Dynabook Chromebook C1 |
+| `kingoftown` | HP Fortis 11 G9 Q Chromebook |
+| `pazquel` | Libera-Merdeka Chromebook C100/C110/C120/C150, Orbic Chromebook, Prowise Chromebook 360 G1 |
 
-Contorno ativo: o hub USB interno da trogdor (RTS5411) recebe energia do `pp3300_hub`, que só o driver `onboard_usb_dev` reclama. O kernel do Arch Linux ARM não o compila (`CONFIG_USB_ONBOARD_DEV`), por isso 30 s depois do arranque o kernel desligava essa alimentação e a pen com o sistema desaparecia. A linha de arranque leva `regulator_ignore_unused` até o kernel do Arch Linux ARM incluir esse driver. A correção de fundo é pedir-lhes que o ativem.
+`wormdingler`, `coachz` and `quackingstick` share the Duet 5's recovery image (strongbad), so their Wi-Fi firmware comes from the same download. The Snapdragon 7c+ Gen 3 (SC7280, "herobrine") boards in mainline are reference designs that never shipped.
 
-Risco conhecido: o kernel assinado do primeiro arranque tem cerca de 53 MiB (kernel 21 MiB + initramfs genérico 23 MiB + 59 device trees), porque o initramfs só pode ser feito à medida do modelo no próprio Chromebook. Não confirmei o limite do depthcharge da trogdor para o tamanho do kernel. Se o Ctrl+U der um bipe e não arrancar, o primeiro passo é reduzir o initramfs do build.
+## Credits
 
-## Dual boot no disco interno (futuro)
-
-Tecnicamente possível: encolher a partição `STATE` do ChromeOS, criar uma `KERN-C` e uma root a seguir, e apontar o `omarchy-chromebook-kernel --partition` para a `KERN-C`. Há dois riscos: um powerwash recria a tabela de partições, e as atualizações do ChromeOS mexem nas prioridades das `KERN-A`/`KERN-B`. Só vale a pena depois de a pen arrancar bem.
+[Omarchy](https://github.com/basecamp/omarchy) and its ISO's install sequence, [Arch Linux ARM](https://archlinuxarm.org), the mainline SC7180 and trogdor work in Linux, and George Chan's SC7180 CAMSS series. `camera/dkms/` contains Linux kernel source, under the GPL-2.0 its files name.

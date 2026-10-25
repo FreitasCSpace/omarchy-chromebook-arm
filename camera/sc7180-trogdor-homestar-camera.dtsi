@@ -8,10 +8,16 @@
  * George Chan's sc7180 CAMSS series (RFT v3, 2024); its addresses, interrupts
  * and SMMU stream IDs are checked against ChromeOS's homestar device tree.
  *
- * The wiring is ChromeOS's: the rear OV8856 (autofocus module) sits on CCI0
- * master 1 and CSIPHY1, powered by the wf_cam rails (GPIO7), reset on GPIO29,
- * clocked by MCLK1. The front OV5675 sits on CCI0 master 0 and CSIPHY0,
+ * The wiring is ChromeOS's. The front OV5675 sits on CCI0 master 0 at 0x36
+ * (ChromeOS's camx sensor config gives the 8-bit address 0x6c) and CSIPHY0,
  * powered by the uf_cam rails (GPIO6), reset on GPIO30, clocked by MCLK0.
+ *
+ * The rear OV8856 (autofocus module) sits on CCI0 master 1 at 0x10 and
+ * CSIPHY1, powered by the wf_cam rails (GPIO7), reset on GPIO29, clocked by
+ * MCLK1. It does not answer on I2C yet with that power-up, so it is left out:
+ * CAMSS waits for every sensor in its graph before it registers any, and a
+ * rear node would keep the front camera from appearing. Its pin states stay
+ * below for whoever picks it up.
  */
 
 #include <dt-bindings/clock/qcom,camcc-sc7180.h>
@@ -131,16 +137,6 @@
 					remote-endpoint = <&ov5675_ep>;
 				};
 			};
-
-			port@1 {
-				reg = <1>;
-
-				csiphy1_ep: endpoint {
-					clock-lanes = <7>;
-					data-lanes = <0 1 2 3>;
-					remote-endpoint = <&ov8856_ep>;
-				};
-			};
 		};
 	};
 
@@ -179,9 +175,9 @@
 			#size-cells = <0>;
 
 			/* Front camera */
-			camera@10 {
+			camera@36 {
 				compatible = "ovti,ov5675";
-				reg = <0x10>;
+				reg = <0x36>;
 
 				reset-gpios = <&tlmm 30 GPIO_ACTIVE_LOW>;
 				pinctrl-names = "default";
@@ -212,33 +208,7 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 
-			/* Rear camera */
-			camera@10 {
-				compatible = "ovti,ov8856";
-				reg = <0x10>;
-
-				reset-gpios = <&tlmm 29 GPIO_ACTIVE_LOW>;
-				pinctrl-names = "default";
-				pinctrl-0 = <&cam_rear_default &cam_mclk1_default>;
-
-				clocks = <&camcc CAM_CC_MCLK1_CLK>;
-				clock-names = "xvclk";
-				assigned-clocks = <&camcc CAM_CC_MCLK1_CLK>;
-				assigned-clock-rates = <19200000>;
-
-				avdd-supply = <&pp2800_wf_cam>;
-				dovdd-supply = <&pp1800_wf_cam>;
-
-				orientation = <1>;
-
-				port {
-					ov8856_ep: endpoint {
-						data-lanes = <1 2 3 4>;
-						link-frequencies = /bits/ 64 <360000000 180000000>;
-						remote-endpoint = <&csiphy1_ep>;
-					};
-				};
-			};
+			/* Rear camera (OV8856 at 0x10): left out, see the top. */
 		};
 	};
 };

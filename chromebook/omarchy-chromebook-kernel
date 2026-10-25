@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# Packs the kernel, its initramfs and every Qualcomm Chromebook device tree
-# into a FIT image, signs it with the vboot developer keys and writes it to the
-# ChromeOS kernel partition (KERN-A) on the disk the root filesystem lives on.
+# Packs the kernel, its initramfs and the Lenovo Duet 5's (homestar) device
+# trees into a FIT image, signs it with the vboot developer keys and writes it
+# to the ChromeOS kernel partition (KERN-A) on the disk the root filesystem
+# lives on.
 #
 # Depthcharge, the Chromebook's own bootloader, boots only such a partition and
 # picks the device tree whose compatible string matches the board. The root is
@@ -59,16 +60,17 @@ for file in "$kernel" "$initramfs" "$DEVKEYS/kernel.keyblock" "$DEVKEYS/kernel_d
   fi
 done
 
-# Trogdor is the Snapdragon 7c (SC7180) family, Herobrine the 7c+ Gen 3 (SC7280).
+# Homestar is the Duet 5, the one board this port supports; each board
+# revision has its own device tree, and depthcharge picks the matching one.
 dtbs=()
-for dtb in "$DTB_DIR"/sc7180-trogdor-*.dtb "$DTB_DIR"/sc7280-herobrine-*.dtb; do
+for dtb in "$DTB_DIR"/sc7180-trogdor-homestar-*.dtb; do
   if [[ -f $DTB_OVERRIDE_DIR/${dtb##*/} ]]; then
     dtb=$DTB_OVERRIDE_DIR/${dtb##*/}
   fi
   [[ -f $dtb ]] && dtbs+=("$dtb")
 done
 if ((${#dtbs[@]} == 0)); then
-  echo "omarchy-chromebook-kernel: no Chromebook device trees under $DTB_DIR" >&2
+  echo "omarchy-chromebook-kernel: no Duet 5 (homestar) device trees under $DTB_DIR" >&2
   exit 1
 fi
 

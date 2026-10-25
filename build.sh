@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Builds a bootable Omarchy image for Qualcomm Chromebooks (Snapdragon 7c
-# "trogdor", 7c+ Gen 3 "herobrine") that depthcharge boots from a USB stick or
-# SD card in developer mode.
+# Builds a bootable Omarchy image for the Lenovo IdeaPad Duet 5 Chromebook
+# (homestar, Snapdragon 7c Gen 2) that depthcharge boots from a USB stick or SD
+# card in developer mode.
 #
 # It follows the Omarchy ISO's install sequence (omarchy-iso, phases_impl.py)
 # inside an Arch Linux ARM root, with first-boot (deferred) provisioning: the
@@ -10,7 +10,7 @@
 # setup is deferred to that boot too, through Omarchy's image manifest, so it
 # runs against the Chromebook rather than the machine that built the image.
 #
-# Usage: sudo ./build.sh [--resume] [IMAGE]   (default out/omarchy-chromebook.img)
+# Usage: sudo ./build.sh [--resume] [IMAGE]   (default out/omarchy-duet5.img)
 # Must run on aarch64 (the build chroots into the target root natively).
 #
 # --resume reuses an image whose package install already finished and reruns
@@ -25,7 +25,7 @@ if [[ ${1:-} == "--resume" ]]; then
   resume=1
   shift
 fi
-image=${1:-$here/out/omarchy-chromebook.img}
+image=${1:-$here/out/omarchy-duet5.img}
 image_size=${OMARCHY_IMAGE_SIZE:-14G}
 # The rc channel, because stable's aarch64 omarchy (4.0.6) predates the
 # platform detector, omarchy-pkg-defaults and deferred image hardware setup
@@ -50,7 +50,7 @@ if [[ $(uname -m) != "aarch64" ]]; then
   echo "This build chroots into an aarch64 root and must run on aarch64" >&2
   exit 1
 fi
-for tool in sgdisk losetup mkfs.btrfs bsdtar arch-chroot cgpt; do
+for tool in sgdisk losetup mkfs.btrfs bsdtar arch-chroot cgpt cpp dtc; do
   command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }
 done
 
@@ -216,6 +216,33 @@ fi
 # so does pipewire-jack, which conflicts with the jack2 the desktop pulls in.
 pacman_install snapper pipewire pipewire-alsa pipewire-pulse gst-plugin-pipewire libpulse \
   qt6-wayland gtk4-layer-shell webp-pixbuf-loader linux-firmware
+
+step "Installing the Duet 5's front camera"
+# DKMS rebuilds the patched CAMSS driver and the OV5675 driver for every kernel
+# the Chromebook installs later (see camera/dkms/dkms.conf).
+pacman_install dkms linux-aarch64-headers libcamera libcamera-ipa libcamera-tools pipewire-libcamera v4l-utils
+camera_kver=$(basename "$(ls -d "$mnt"/usr/lib/modules/*-ARCH | head -1)")
+rm -rf "$mnt/usr/src/duet5-camera-1"
+cp -r "$here/camera/dkms" "$mnt/usr/src/duet5-camera-1"
+target dkms install duet5-camera/1 -k "$camera_kver"
+# libcamera's software ISP allocates its buffers from the dma-buf heaps.
+install -Dm 0644 "$here/camera/70-dma-heap.rules" "$mnt/etc/udev/rules.d/70-dma-heap.rules"
+# The camera device tree is built from the source of the kernel the image runs,
+# and takes the place of the kernel's homestar DTBs in KERN-A.
+kernel_ver=$(target pacman -Q linux-aarch64 | awk '{ print $2 }' | sed 's/-[0-9]*$//')
+kernel_tarball=$here/dl/linux-$kernel_ver.tar.xz
+if [[ ! -f $kernel_tarball ]]; then
+  curl -fL -o "$kernel_tarball.part" "https://cdn.kernel.org/pub/linux/kernel/v${kernel_ver%%.*}.x/linux-$kernel_ver.tar.xz"
+  mv "$kernel_tarball.part" "$kernel_tarball"
+fi
+kernel_src=$here/out/linux-$kernel_ver
+rm -rf "$kernel_src"
+mkdir -p "$here/out"
+bsdtar -xf "$kernel_tarball" -C "$here/out" \
+  "linux-$kernel_ver/arch/arm64/boot/dts/qcom" "linux-$kernel_ver/arch/arm/boot/dts" \
+  "linux-$kernel_ver/include" "linux-$kernel_ver/scripts/dtc/include-prefixes"
+"$here/camera/build-dtbs.sh" "$kernel_src" "$mnt/usr/share/omarchy-chromebook/dtbs"
+rm -rf "$kernel_src"
 
 step "Writing fstab, locale and hostname"
 root_uuid=$(blkid -s UUID -o value "${loop}p2")

@@ -10,8 +10,9 @@
 # published recovery image for the board.
 #
 # Usage: sudo ./fetch-chromeos-firmware.sh [RECOVERY_ZIP_URL]
-# The default is the strongbad recovery image (homestar, coachz, wormdingler,
-# quackingstick). Other boards: pick the URL whose hwidmatch names the board in
+# The default is the Duet 5's recovery image (strongbad, which ChromeOS also
+# serves to coachz, wormdingler and quackingstick). Newer releases are listed
+# under the HOMESTAR hwidmatch in
 # https://dl.google.com/dl/edgedl/chromeos/recovery/recovery2.json
 
 set -euo pipefail
