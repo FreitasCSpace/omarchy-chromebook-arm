@@ -1,0 +1,6 @@
+# Kernel command line for depthcharge (omarchy-chromebook-kernel joins these lines).
+# %U is the kernel partition's PARTUUID; the root is the partition right after it.
+root=PARTUUID=%U/PARTNROFF=1 rootwait rw rootflags=subvol=@
+# Depthcharge hands over before the display is set up; keep the console on the panel.
+console=tty1
+quiet splash loglevel=3

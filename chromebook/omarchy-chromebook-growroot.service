@@ -1,0 +1,12 @@
+[Unit]
+Description=Grow the Omarchy root to fill its drive
+Before=omarchy-provision-owner.service omarchy-provision-hardware.service
+ConditionPathExists=!/var/lib/omarchy/chromebook/grown
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-chromebook-growroot
+ExecStartPost=/usr/bin/install -D /dev/null /var/lib/omarchy/chromebook/grown
+
+[Install]
+WantedBy=multi-user.target

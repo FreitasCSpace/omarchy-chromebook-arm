@@ -1,0 +1,166 @@
+#!/bin/bash
+
+# Packs the kernel, its initramfs and every Qualcomm Chromebook device tree
+# into a FIT image, signs it with the vboot developer keys and writes it to the
+# ChromeOS kernel partition (KERN-A) on the disk the root filesystem lives on.
+#
+# Depthcharge, the Chromebook's own bootloader, boots only such a partition: it
+# picks the device tree whose compatible string matches the board, and replaces
+# %U in the command line with the kernel partition's PARTUUID, so the root is
+# found as the partition right after it with no disk-specific path baked in.
+#
+# Usage: omarchy-chromebook-kernel [--partition DEV] [KERNEL] [INITRAMFS]
+#
+# mkinitcpio runs it after every initramfs build (/etc/initcpio/post/), so
+# kernel updates, `mkinitcpio -P` and Omarchy's own hardware setup all end with
+# a bootable kernel partition.
+
+set -euo pipefail
+
+CHROMEOS_KERNEL_TYPE=fe3a2a5d-4f32-41a7-b725-accc3285a309
+CMDLINE_FILE=/etc/kernel/chromebook-cmdline
+DEVKEYS=/usr/share/vboot/devkeys
+DTB_DIR=/boot/dtbs/qcom
+
+partition=""
+while (($#)); do
+  case "$1" in
+    --partition)
+      partition=$2
+      shift 2
+      ;;
+    -h | --help)
+      sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+kernel=${1:-/boot/Image}
+initramfs=${2:-/boot/initramfs-linux.img}
+
+# mkinitcpio passes the kernel it built for, which on Arch Linux ARM is the
+# modules directory's vmlinuz copy; the uncompressed Image beside it in /boot is
+# the same build, and is what the FIT carries.
+if [[ $kernel == /usr/lib/modules/*/vmlinuz ]]; then
+  kernel=/boot/Image
+fi
+
+for file in "$kernel" "$initramfs" "$DEVKEYS/kernel.keyblock" "$DEVKEYS/kernel_data_key.vbprivk"; do
+  if [[ ! -f $file ]]; then
+    echo "omarchy-chromebook-kernel: missing $file" >&2
+    exit 1
+  fi
+done
+
+# Trogdor is the Snapdragon 7c (SC7180) family, Herobrine the 7c+ Gen 3 (SC7280).
+dtbs=()
+for dtb in "$DTB_DIR"/sc7180-trogdor-*.dtb "$DTB_DIR"/sc7280-herobrine-*.dtb; do
+  [[ -f $dtb ]] && dtbs+=("$dtb")
+done
+if ((${#dtbs[@]} == 0)); then
+  echo "omarchy-chromebook-kernel: no Chromebook device trees under $DTB_DIR" >&2
+  exit 1
+fi
+
+if [[ -z $partition ]]; then
+  root_source=$(findmnt -nvo SOURCE /)
+  disk=/dev/$(lsblk -no PKNAME "$root_source" | head -1)
+  partition=$(lsblk -rnpo PATH,PARTTYPE "$disk" | awk -v type="$CHROMEOS_KERNEL_TYPE" '$2 == type { print $1; exit }')
+  if [[ -z $partition ]]; then
+    echo "omarchy-chromebook-kernel: no ChromeOS kernel partition on $disk" >&2
+    exit 1
+  fi
+fi
+disk=/dev/$(lsblk -no PKNAME "$partition" | head -1)
+partnum=$(cat "/sys/class/block/${partition##*/}/partition")
+
+if [[ -f $CMDLINE_FILE ]]; then
+  cmdline=$(grep -v '^#' "$CMDLINE_FILE" | tr '\n' ' ' | sed 's/  */ /g; s/ $//')
+else
+  cmdline="root=PARTUUID=%U/PARTNROFF=1 rootwait rw"
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+lz4 -q -9 -c "$kernel" >"$work/Image.lz4"
+
+# An explicit tree, rather than mkimage's automatic one, so the ramdisk is
+# marked uncompressed (the kernel unpacks it itself) and every configuration
+# names its board, which is what depthcharge matches against.
+{
+  echo '/dts-v1/;'
+  echo '/ {'
+  echo '  description = "Omarchy";'
+  echo '  #address-cells = <1>;'
+  echo '  images {'
+  echo '    kernel-1 {'
+  echo '      description = "Linux";'
+  echo "      data = /incbin/(\"$work/Image.lz4\");"
+  echo '      type = "kernel"; arch = "arm64"; os = "linux"; compression = "lz4";'
+  echo '      load = <0>; entry = <0>;'
+  echo '    };'
+  echo '    ramdisk-1 {'
+  echo '      description = "initramfs";'
+  echo "      data = /incbin/(\"$initramfs\");"
+  echo '      type = "ramdisk"; arch = "arm64"; os = "linux"; compression = "none";'
+  echo '    };'
+  i=1
+  for dtb in "${dtbs[@]}"; do
+    echo "    fdt-$i {"
+    echo "      description = \"${dtb##*/}\";"
+    echo "      data = /incbin/(\"$dtb\");"
+    echo '      type = "flat_dt"; arch = "arm64"; compression = "none";'
+    echo '    };'
+    ((i++))
+  done
+  echo '  };'
+  echo '  configurations {'
+  echo '    default = "conf-1";'
+  i=1
+  for dtb in "${dtbs[@]}"; do
+    compatible=$(fdtget -t s "$dtb" / compatible | sed 's/ /", "/g')
+    echo "    conf-$i {"
+    echo "      compatible = \"$compatible\";"
+    echo '      kernel = "kernel-1"; ramdisk = "ramdisk-1";'
+    echo "      fdt = \"fdt-$i\";"
+    echo '    };'
+    ((i++))
+  done
+  echo '  };'
+  echo '};'
+} >"$work/omarchy.its"
+
+mkimage -q -f "$work/omarchy.its" "$work/omarchy.itb"
+
+printf '%s\n' "$cmdline" >"$work/cmdline"
+# vbutil_kernel wants a bootloader blob; ARM depthcharge never runs it.
+head -c 512 /dev/zero >"$work/bootloader.bin"
+
+futility vbutil_kernel --pack "$work/kernel.kpart" \
+  --version 1 \
+  --arch aarch64 \
+  --vmlinuz "$work/omarchy.itb" \
+  --keyblock "$DEVKEYS/kernel.keyblock" \
+  --signprivate "$DEVKEYS/kernel_data_key.vbprivk" \
+  --config "$work/cmdline" \
+  --bootloader "$work/bootloader.bin" >/dev/null
+
+image_size=$(stat -c %s "$work/kernel.kpart")
+partition_size=$(blockdev --getsize64 "$partition")
+if ((image_size > partition_size)); then
+  echo "omarchy-chromebook-kernel: kernel image ($image_size bytes) does not fit $partition ($partition_size bytes)" >&2
+  exit 1
+fi
+
+dd if="$work/kernel.kpart" of="$partition" bs=4M conv=fsync status=none
+
+# Successful, high priority: depthcharge boots it every time instead of
+# counting down tries and falling back to ChromeOS.
+cgpt add -i "$partnum" -S 1 -T 0 -P 15 "$disk"
+
+echo "Wrote $((image_size / 1024 / 1024)) MiB kernel image with ${#dtbs[@]} device trees to $partition"

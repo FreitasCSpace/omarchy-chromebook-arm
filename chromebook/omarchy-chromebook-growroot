@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Grows the root partition and its btrfs filesystem to fill the drive the image
+# was written to, once, on the first boot. The image is built small so it fits
+# any 16 GB stick; a larger drive would otherwise sit mostly unused.
+
+set -euo pipefail
+
+root_source=$(findmnt -nvo SOURCE /)
+disk=/dev/$(lsblk -no PKNAME "$root_source" | head -1)
+partnum=$(cat "/sys/class/block/${root_source##*/}/partition")
+
+# The image's backup GPT sits where the image ended, not at the end of the drive.
+sgdisk -e "$disk" >/dev/null
+growpart "$disk" "$partnum" || true
+btrfs filesystem resize max /

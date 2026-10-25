@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# mkinitcpio post hook: every initramfs build ends with a fresh signed kernel
+# partition, so depthcharge boots what was just built. mkinitcpio passes the
+# kernel and the initramfs it wrote.
+
+kernel=$1
+initramfs=$2
+
+# Only the default image boots; a fallback or test build leaves KERN-A alone.
+if [[ $initramfs != /boot/initramfs-linux.img ]]; then
+  exit 0
+fi
+
+exec /usr/bin/omarchy-chromebook-kernel "$kernel" "$initramfs"
