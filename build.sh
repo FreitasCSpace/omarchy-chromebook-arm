@@ -181,6 +181,14 @@ install -Dm 0644 "$here/chromebook/zz-omarchy-chromebook.conf" "$mnt/etc/mkinitc
 # Arch Linux ARM's vboot-utils ships no developer keys. These are vboot_reference's
 # public test keys, which every Chromebook in developer mode accepts.
 install -Dm 0644 -t "$mnt/usr/share/vboot/devkeys" "$here/chromebook/devkeys/kernel.keyblock" "$here/chromebook/devkeys/kernel_data_key.vbprivk"
+# The Chromebook-only firmware linux-firmware can't ship (the modem image
+# trogdor's Wi-Fi runs on), taken from Google's recovery image by
+# fetch-chromeos-firmware.sh. Without it the image boots with no Wi-Fi.
+if [[ -d $here/dl/firmware ]]; then
+  cp -a "$here/dl/firmware/." "$mnt/usr/lib/firmware/"
+else
+  echo "WARNING: no dl/firmware; run ./fetch-chromeos-firmware.sh first or the Chromebook has no Wi-Fi" >&2
+fi
 
 if ((! resume)); then
 

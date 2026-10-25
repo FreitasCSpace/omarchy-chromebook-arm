@@ -23,8 +23,11 @@ Num sistema aarch64 (por exemplo, o Linux do próprio Chromebook):
 sudo apt install vboot-kernel-utils cgpt u-boot-tools arch-install-scripts libarchive-tools btrfs-progs gdisk lz4 device-tree-compiler
 git clone --depth 1 https://github.com/basecamp/omarchy.git upstream
 git clone --depth 1 https://github.com/omacom/omarchy-iso.git iso
+sudo ./fetch-chromeos-firmware.sh   # firmware do modem/Wi-Fi, tirado da imagem de recuperação oficial do ChromeOS
 sudo ./build.sh            # -> out/omarchy-chromebook.img (14 GiB, cabe numa pen de 16 GB)
 ```
+
+O Wi-Fi da trogdor (WCN3990) corre no subsistema do modem, que arranca imagens assinadas pela Google (`qcom/sc7180-trogdor/modem*/{mba,qdsp6sw}.mbn`). O linux-firmware não as traz e não podem ser redistribuídas, por isso o repositório inclui o script e não os ficheiros. O script descarrega a imagem de recuperação "strongbad" (homestar, coachz, wormdingler, quackingstick) e copia só esse diretório. Para outros modelos, passa-lhe o URL certo do `recovery2.json`.
 
 Os pacotes ficam em cache em `dl/pkg`, por isso um segundo build não volta a descarregar nada. `sudo ./build.sh --resume` reaproveita uma imagem cuja instalação de pacotes já terminou e corre só a configuração seguinte. Serve para iterar sobre um passo que falhou; uma imagem para distribuir faz-se sempre sem ele.
 
