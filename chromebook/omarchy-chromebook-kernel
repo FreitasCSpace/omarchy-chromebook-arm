@@ -4,10 +4,10 @@
 # into a FIT image, signs it with the vboot developer keys and writes it to the
 # ChromeOS kernel partition (KERN-A) on the disk the root filesystem lives on.
 #
-# Depthcharge, the Chromebook's own bootloader, boots only such a partition: it
-# picks the device tree whose compatible string matches the board, and replaces
-# %U in the command line with the kernel partition's PARTUUID, so the root is
-# found as the partition right after it with no disk-specific path baked in.
+# Depthcharge, the Chromebook's own bootloader, boots only such a partition and
+# picks the device tree whose compatible string matches the board. The root is
+# the partition right after the kernel partition, named on the command line by
+# its filesystem UUID.
 #
 # Usage: omarchy-chromebook-kernel [--partition DEV] [KERNEL] [INITRAMFS]
 #
@@ -17,7 +17,6 @@
 
 set -euo pipefail
 
-CHROMEOS_KERNEL_TYPE=fe3a2a5d-4f32-41a7-b725-accc3285a309
 CMDLINE_FILE=/etc/kernel/chromebook-cmdline
 DEVKEYS=/usr/share/vboot/devkeys
 DTB_DIR=/boot/dtbs/qcom
@@ -45,7 +44,8 @@ initramfs=${2:-/boot/initramfs-linux.img}
 # mkinitcpio passes the kernel it built for, which on Arch Linux ARM is the
 # modules directory's vmlinuz copy; the uncompressed Image beside it in /boot is
 # the same build, and is what the FIT carries.
-if [[ $kernel == /usr/lib/modules/*/vmlinuz ]]; then
+# With `mkinitcpio -k <version>` it passes the version string instead of a path.
+if [[ $kernel == /usr/lib/modules/*/vmlinuz || ! -f $kernel ]]; then
   kernel=/boot/Image
 fi
 
@@ -69,7 +69,9 @@ fi
 if [[ -z $partition ]]; then
   root_source=$(findmnt -nvo SOURCE /)
   disk=/dev/$(lsblk -no PKNAME "$root_source" | head -1)
-  partition=$(lsblk -rnpo PATH,PARTTYPE "$disk" | awk -v type="$CHROMEOS_KERNEL_TYPE" '$2 == type { print $1; exit }')
+  # cgpt reads the partition type from the GPT itself; lsblk would need udev's
+  # database, which a chroot does not have.
+  partition=$(cgpt find -t kernel "$disk" 2>/dev/null | head -1)
   if [[ -z $partition ]]; then
     echo "omarchy-chromebook-kernel: no ChromeOS kernel partition on $disk" >&2
     exit 1
@@ -78,10 +80,28 @@ fi
 disk=/dev/$(lsblk -no PKNAME "$partition" | head -1)
 partnum=$(cat "/sys/class/block/${partition##*/}/partition")
 
+# The root is the partition right after the kernel partition. ChromeOS names it
+# root=PARTUUID=%U/PARTNROFF=1, which only the kernel's own root mounting
+# understands; mkinitcpio's initramfs waits forever for such a device, so the
+# command line names the filesystem by UUID instead.
+root_part=""
+for part in $(lsblk -lnpo PATH "$disk"); do
+  number_file=/sys/class/block/${part##*/}/partition
+  if [[ -f $number_file ]] && (($(cat "$number_file") == partnum + 1)); then
+    root_part=$part
+  fi
+done
+root_uuid=$(blkid -s UUID -o value "$root_part" 2>/dev/null || true)
+if [[ -z $root_uuid ]]; then
+  echo "omarchy-chromebook-kernel: no filesystem on the partition after $partition" >&2
+  exit 1
+fi
+
+cmdline="root=UUID=$root_uuid"
 if [[ -f $CMDLINE_FILE ]]; then
-  cmdline=$(grep -v '^#' "$CMDLINE_FILE" | tr '\n' ' ' | sed 's/  */ /g; s/ $//')
+  cmdline+=" $(grep -v '^#' "$CMDLINE_FILE" | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
 else
-  cmdline="root=PARTUUID=%U/PARTNROFF=1 rootwait rw"
+  cmdline+=" rootwait rw"
 fi
 
 work=$(mktemp -d)
