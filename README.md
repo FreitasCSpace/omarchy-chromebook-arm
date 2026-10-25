@@ -54,6 +54,8 @@ Para voltar ao ChromeOS, basta reiniciar sem a pen ou carregar em Ctrl+D.
 | Arranque por depthcharge, ecrã, teclado, Wi-Fi, áudio | **por testar no hardware**: os drivers e o firmware estão no kernel e no `linux-firmware-qcom`, mas ainda não arrancou num Chromebook real |
 | Dual boot no disco interno | não suportado (ver abaixo) |
 
+Contorno ativo: o hub USB interno da trogdor (RTS5411) recebe energia do `pp3300_hub`, que só o driver `onboard_usb_dev` reclama. O kernel do Arch Linux ARM não o compila (`CONFIG_USB_ONBOARD_DEV`), por isso 30 s depois do arranque o kernel desligava essa alimentação e a pen com o sistema desaparecia. A linha de arranque leva `regulator_ignore_unused` até o kernel do Arch Linux ARM incluir esse driver. A correção de fundo é pedir-lhes que o ativem.
+
 Risco conhecido: o kernel assinado do primeiro arranque tem cerca de 53 MiB (kernel 21 MiB + initramfs genérico 23 MiB + 59 device trees), porque o initramfs só pode ser feito à medida do modelo no próprio Chromebook. Não confirmei o limite do depthcharge da trogdor para o tamanho do kernel. Se o Ctrl+U der um bipe e não arrancar, o primeiro passo é reduzir o initramfs do build.
 
 ## Dual boot no disco interno (futuro)

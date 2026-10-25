@@ -3,5 +3,11 @@
 rootwait rw rootflags=subvol=@
 # Depthcharge hands over before the display is set up; keep the console on the panel.
 console=tty1
+# Trogdor's onboard USB hub (RTS5411) runs on the pp3300_hub rail, which only
+# the onboard_usb_dev driver claims. Arch Linux ARM's kernel doesn't build it
+# (CONFIG_USB_ONBOARD_DEV), so 30 s after boot the kernel switches the "unused"
+# rail off, the hub and the USB drive the root lives on vanish, and btrfs shuts
+# down. Keep unclaimed rails on until that kernel builds the driver.
+regulator_ignore_unused
 # Verbose until boot is proven on the hardware; "quiet splash" brings the Plymouth splash back.
 loglevel=7
