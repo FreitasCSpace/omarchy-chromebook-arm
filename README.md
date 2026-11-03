@@ -83,6 +83,25 @@ Packages are cached in `dl/pkg`, so a second build downloads nothing twice. `sud
 
 To get back to ChromeOS, reboot without the stick or press Ctrl+D.
 
+### Move it to the internal eMMC
+
+Booting from the eMMC is much faster than from a USB stick and gives Omarchy the whole disk. It **erases ChromeOS**, so first make a ChromeOS recovery stick (any other stick of 8 GB or more), from Omarchy itself:
+
+```bash
+./make-chromeos-recovery-usb.sh --download      # Google's Duet 5 recovery image, SHA-1 checked
+sudo ./make-chromeos-recovery-usb.sh /dev/sdX   # writes it and reads it back
+```
+
+To use it: power off, hold Esc + Refresh, press Power and insert it.
+
+Then, booted from the Omarchy stick:
+
+```bash
+sudo omarchy-chromebook-install-emmc   # on images older than this script: sudo ./chromebook/omarchy-chromebook-install-emmc
+```
+
+It repartitions the eMMC like the USB image (KERN-A plus a btrfs root), copies every subvolume with btrfs send/receive, gives the copy its own UUID and writes a signed kernel for it. Snapper's snapshots stay on the stick. Reboot and press **Ctrl+D** at the developer mode screen. **Never press Space there**: it leaves developer mode and wipes the eMMC. The stick is left as it was and still boots with Ctrl+U.
+
 ## Other devices
 
 These Chromebooks use the same Snapdragon 7c (SC7180, "trogdor") platform and have device trees in mainline Linux, so they are the most likely candidates for a port. **None of them is tested or supported.** Each needs at least its own device tree in `omarchy-chromebook-kernel`, its ChromeOS recovery image in `fetch-chromeos-firmware.sh`, and a check of its audio profile; the camera wiring and sensors differ per board.

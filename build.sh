@@ -175,6 +175,7 @@ step "Installing the Chromebook boot chain"
 pacman_install vboot-utils uboot-tools dtc lz4 gptfdisk cloud-guest-utils btrfs-progs linux-firmware-qcom
 install -m 0755 "$here/chromebook/omarchy-chromebook-kernel" "$mnt/usr/bin/omarchy-chromebook-kernel"
 install -m 0755 "$here/chromebook/omarchy-chromebook-growroot" "$mnt/usr/bin/omarchy-chromebook-growroot"
+install -m 0755 "$here/chromebook/omarchy-chromebook-install-emmc" "$mnt/usr/bin/omarchy-chromebook-install-emmc"
 install -m 0644 "$here/chromebook/omarchy-chromebook-growroot.service" "$mnt/etc/systemd/system/omarchy-chromebook-growroot.service"
 install -Dm 0644 "$here/chromebook/chromebook-cmdline" "$mnt/etc/kernel/chromebook-cmdline"
 target systemctl enable omarchy-chromebook-growroot.service

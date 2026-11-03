@@ -1,0 +1,167 @@
+#!/bin/bash
+
+# Moves the running Omarchy from the USB drive it booted from onto the Duet 5's
+# internal eMMC, replacing ChromeOS. The USB drive is left as it was, so it
+# still boots (Ctrl+U) if anything goes wrong.
+#
+# Make a ChromeOS recovery stick first (make-chromeos-recovery-usb.sh in the
+# port's repository): it is the only way back to ChromeOS afterwards.
+#
+# Usage: sudo omarchy-chromebook-install-emmc [/dev/mmcblkN]
+#
+# The eMMC gets the same layout as the USB image: a ChromeOS kernel partition
+# (KERN-A) and, right after it, the btrfs root. Every btrfs subvolume /etc/fstab
+# mounts (@, @home, @log, @pkg) is copied with btrfs send/receive from a
+# read-only snapshot, so the copy is consistent while the system runs. Snapper's
+# snapshots stay behind on the USB drive. The copy gets a new filesystem UUID,
+# its fstab follows, and omarchy-chromebook-kernel writes a kernel partition
+# whose command line names it.
+#
+# Then reboot and press Ctrl+D at the developer mode screen (never Space: that
+# leaves developer mode and wipes the eMMC).
+
+set -euo pipefail
+
+KERNEL_PART_SIZE=256M
+CHROMEOS_KERNEL_TYPE=FE3A2A5D-4F32-41A7-B725-ACCC3285A309
+
+die() {
+  echo "omarchy-chromebook-install-emmc: $*" >&2
+  exit 1
+}
+
+((EUID == 0)) || die "run as root: sudo $0"
+
+root_source=$(findmnt -nvo SOURCE /)
+root_disk=/dev/$(lsblk -no PKNAME "$root_source" | head -1)
+root_uuid=$(blkid -s UUID -o value "$root_source")
+[[ $(findmnt -nvo FSTYPE /) == btrfs ]] || die "the root is not btrfs"
+
+target=${1:-}
+if [[ -z $target ]]; then
+  # The eMMC's boot0/boot1 hardware partitions show up as disks too; skip them.
+  mapfile -t mmcs < <(lsblk -dnpo NAME,TYPE | awk '$2 == "disk" && $1 ~ /\/mmcblk[0-9]+$/ { print $1 }')
+  ((${#mmcs[@]} == 1)) || die "found ${#mmcs[@]} eMMC disks; name one: $0 /dev/mmcblkN"
+  target=${mmcs[0]}
+fi
+[[ -b $target && $(lsblk -dno TYPE "$target") == disk ]] || die "$target is not a disk"
+[[ $target =~ ^/dev/mmcblk[0-9]+$ ]] || die "$target is not the eMMC"
+[[ $target != "$root_disk" ]] || die "the system already runs from $target"
+if lsblk -nro MOUNTPOINTS "$target" | grep -q .; then
+  die "something on $target is mounted; unmount it first"
+fi
+kernel_part=${target}p1
+root_part=${target}p2
+
+# Each subvolume /etc/fstab mounts from the root filesystem, and the one that is /.
+mapfile -t subvols < <(awk -v uuid="UUID=$root_uuid" '
+  $1 == uuid && $3 == "btrfs" {
+    n = split($4, opts, ",")
+    for (i = 1; i <= n; i++) if (opts[i] ~ /^subvol=/) { sub(/^subvol=\/?/, "", opts[i]); print opts[i] }
+  }' /etc/fstab | awk '!seen[$0]++')
+root_subvol=$(findmnt -nvo FSROOT / | sed 's|^/||')
+((${#subvols[@]} > 0)) || die "no btrfs subvolumes for UUID=$root_uuid in /etc/fstab"
+printf '%s\n' "${subvols[@]}" | grep -qx "$root_subvol" || die "/etc/fstab does not mount the root subvolume $root_subvol"
+
+used=$(btrfs filesystem usage -b / | awk '$1 == "Used:" { print $2; exit }')
+capacity=$(blockdev --getsize64 "$target")
+((used + 4 * 1024 ** 3 < capacity)) || die "$((used / 1024 ** 3)) GiB in use does not fit $target"
+
+echo "Copy:  $root_source ($root_disk), subvolumes ${subvols[*]}, $((used / 1024 ** 3)) GiB in use"
+echo "To:    $target, $((capacity / 1024 ** 3)) GiB, which now holds:"
+lsblk -o NAME,SIZE,PARTLABEL,FSTYPE "$target" | sed 's/^/       /'
+if lsblk -nro PARTLABEL "$target" | grep -qx 'ROOT-A'; then
+  echo
+  echo "That is ChromeOS. It and everything in it will be erased."
+  echo "The only way back is a ChromeOS recovery stick (make-chromeos-recovery-usb.sh)."
+fi
+echo
+read -r -p "Type ERASE $target to continue: " answer
+[[ $answer == "ERASE $target" ]] || die "cancelled"
+
+src=$(mktemp -d /run/emmc-src.XXXXXX)
+dst=$(mktemp -d /run/emmc-dst.XXXXXX)
+tag=emmc-copy-$(date +%Y%m%d%H%M%S)
+cleanup() {
+  set +e
+  for sub in "${subvols[@]}"; do
+    [[ -d $src/$sub.$tag ]] && btrfs subvolume delete -c "$src/$sub.$tag" >/dev/null
+  done
+  mountpoint -q "$src" && umount "$src"
+  mountpoint -q "$dst" && umount "$dst"
+  rmdir "$src" "$dst" 2>/dev/null
+}
+trap cleanup EXIT
+
+echo "Partitioning $target"
+sgdisk --zap-all "$target" >/dev/null
+wipefs -qa "$target"
+sgdisk \
+  -n 1:0:+$KERNEL_PART_SIZE -t 1:$CHROMEOS_KERNEL_TYPE -c 1:KERN-A \
+  -n 2:0:0 -t 2:8300 -c 2:root \
+  "$target" >/dev/null
+partprobe "$target" 2>/dev/null || blockdev --rereadpt "$target"
+udevadm settle
+[[ -b $kernel_part && -b $root_part ]] || die "the new partitions did not appear"
+
+mkfs.btrfs -q -f -L omarchy "$root_part"
+new_uuid=$(blkid -s UUID -o value "$root_part")
+
+mount -o subvolid=5 "$root_source" "$src"
+mount -o subvolid=5,compress=zstd,noatime "$root_part" "$dst"
+
+for sub in "${subvols[@]}"; do
+  echo "Copying $sub"
+  btrfs subvolume snapshot -r "$src/$sub" "$src/$sub.$tag" >/dev/null
+  btrfs filesystem sync "$src"
+  btrfs send -q --proto 0 --compressed-data "$src/$sub.$tag" | btrfs receive -q "$dst"
+  # A received snapshot is read-only; the system mounts a writable one by the
+  # original name.
+  btrfs subvolume snapshot "$dst/$sub.$tag" "$dst/$sub" >/dev/null
+  btrfs subvolume delete -c "$dst/$sub.$tag" >/dev/null
+  btrfs subvolume delete -c "$src/$sub.$tag" >/dev/null
+done
+
+# btrfs send leaves out subvolumes nested in a copied one (Snapper's
+# /.snapshots); not even an empty directory stands in for them. Create them
+# again, empty, so Snapper keeps working.
+mapfile -t all_paths < <(btrfs subvolume list "$src" | awk '{ print $NF }')
+for path in "${all_paths[@]}"; do
+  for sub in "${subvols[@]}"; do
+    [[ $path == "$sub"/* ]] || continue
+    nested_deeper=0
+    for other in "${all_paths[@]}"; do
+      if [[ $other != "$sub" && $other != "$path" && $path == "$other"/* ]]; then
+        nested_deeper=1
+      fi
+    done
+    ((nested_deeper)) && continue
+    [[ -d $dst/${path%/*} ]] || continue
+    if [[ ! -e $dst/$path ]] || rmdir "$dst/$path" 2>/dev/null; then
+      echo "Recreating subvolume $path"
+      btrfs subvolume create "$dst/$path" >/dev/null
+      chmod "$(stat -c %a "$src/$path")" "$dst/$path"
+      chown "$(stat -c %u:%g "$src/$path")" "$dst/$path"
+    fi
+  done
+done
+
+sed -i "s/$root_uuid/$new_uuid/g" "$dst/$root_subvol/etc/fstab"
+leftover=$(grep -rlsI "$root_uuid" "$dst/$root_subvol/etc" 2>/dev/null || true)
+if [[ -n $leftover ]]; then
+  echo "Note: these files still name the USB drive's UUID $root_uuid:"
+  printf '  %s\n' $leftover
+fi
+
+btrfs filesystem sync "$dst"
+umount "$dst"
+
+echo "Writing the kernel partition"
+omarchy-chromebook-kernel --partition "$kernel_part"
+cgpt show -q "$target"
+
+echo
+echo "Done. Omarchy is on $target (root UUID $new_uuid)."
+echo "Reboot, and at the developer mode screen press Ctrl+D to boot the eMMC."
+echo "Never press Space there: it leaves developer mode and wipes the eMMC."
+echo "The USB drive is untouched and still boots with Ctrl+U."
